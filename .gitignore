@@ -1,0 +1,15 @@
+/docs/
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+.agents/
+.codex/
+.claude/
+.env
+.env.*
+!.env.example
+/vendor/
+/node_modules/
+*.log
+*.pem
+*.key
+*.jks
+*.keystore
