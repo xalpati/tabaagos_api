@@ -13,3 +13,12 @@
 *.key
 *.jks
 *.keystore
+
+/bootstrap/cache/*.php
+/storage/**
+!/storage/**/
+!/storage/**/.gitignore
+/.phpunit.cache/
+/.phpunit.result.cache
+/auth.json
+/credentials*.json

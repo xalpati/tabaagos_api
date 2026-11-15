@@ -8,7 +8,7 @@
 
 </div>
 
-> 🚧 **En desarrollo — fase de diseño.** El repositorio público `tabapagos_api` está inicializado. Todavía no contiene una aplicación Laravel ejecutable, migraciones o endpoints disponibles.
+> 🚧 **Implementación inicial.** Laravel 13 con migraciones, sesiones por dispositivo, cuentas bancarias, intentos CoDi e inbox/outbox durable. Google, Pey y FCM requieren configuración y validación real antes de producción.
 
 ## 🧭 Explorar
 
@@ -32,7 +32,7 @@ Este repositorio se dedica al backend Laravel/PHP y a su base de datos MySQL.
 | 🔔 Entrega de eventos | Enviar confirmaciones firmadas con acuse y reenvío durable |
 | 🧾 Auditoría | Conservar trazabilidad mínima y diagnósticos protegidos |
 
-Los nombres de módulos describen el diseño previsto, no servicios implementados.
+Estos módulos están implementados y cubiertos por pruebas locales. Los servicios externos aún no se han validado con credenciales reales.
 
 ## 💳 Confirmación de pagos
 
@@ -89,7 +89,7 @@ La API no sincronizará el catálogo ni las ventas completas entre dispositivos.
 - Datos bancarios protegidos, errores sanitizados y registros sin credenciales.
 - Credenciales, archivos de entorno y material privado de firma excluidos de Git.
 
-Estos son requisitos de diseño; aún no hay código ni despliegue cuya seguridad haya sido comprobada.
+Los controles del servidor se comprueban con pruebas locales. Falta validación real de las integraciones y una revisión de seguridad antes de producción.
 
 ## 🧱 Tecnología
 
@@ -102,7 +102,7 @@ Estos son requisitos de diseño; aún no hay código ni despliegue cuya segurida
 | Transporte push previsto | Firebase Cloud Messaging |
 | Alojamiento objetivo | Hostinger; recursos y configuración por verificar |
 
-Las versiones, dependencias y configuración de colas se fijarán al inicializar la aplicación.
+PHP 8.3 o posterior, Composer 2 y MySQL. Dependencias fijadas en `composer.lock`. Inbox/outbox procesados por scheduler, con reintentos persistidos en MySQL.
 
 ## 🛠️ Desarrollo
 
@@ -111,12 +111,55 @@ git clone https://github.com/xalpati/tabapagos_api.git
 cd tabapagos_api
 ```
 
-El repositorio contiene README y exclusiones iniciales. La configuración del entorno, instalación, migraciones, workers y pruebas se documentará al incorporar el proyecto Laravel.
+Instalación local con PowerShell, sobre una base exclusiva del proyecto:
 
-### Próximas entregas
+```powershell
+composer install
+Copy-Item .env.example .env
+php artisan key:generate
+# Configurar DB_* en .env antes de migrar.
+php artisan migrate
+php artisan serve
+```
 
-- [ ] Base Laravel/MySQL y configuración por entorno.
-- [ ] Identidad Google, sesiones y dispositivos.
-- [ ] Cuentas bancarias e intentos de cobro.
-- [ ] Webhook, persistencia, firma y entrega durable.
-- [ ] Pruebas de integración y preparación de despliegue.
+Ejecutar `php artisan schedule:work` en otra terminal. En el servidor, configurar cron para `php artisan schedule:run` cada minuto. `php artisan events:dispatch` procesa un lote manualmente; no consulta pagos en Pey.
+
+### Configuración externa
+
+- `GOOGLE_CLIENT_ID`: cliente autorizado para validar ID tokens; la identidad se obtiene de `sub` verificado.
+- `PEY_ENABLED=false` por defecto. Activar solo después de configurar `PEY_API_KEY`, `PEY_API_KEY_ID` y `PEY_WEBHOOK_SECRET` y autorizar el uso real. Webhook: `POST /api/webhooks/pey`.
+- `EVENT_SIGNING_KEY_PATH`: ruta absoluta de clave privada RSA de al menos 2048 bits fuera de Git y `public/`. `EVENT_SIGNING_KID` identifica la clave pública confiable distribuida en Android. Eventos firmados con RS256; definir rotación antes de operar.
+- `FCM_PROJECT_ID` y `GOOGLE_APPLICATION_CREDENTIALS`: proyecto Firebase y ruta absoluta de la cuenta de servicio autorizada para FCM HTTP v1. Mantener el archivo fuera de Git y `public/`.
+- Comprobar HTTPS, reloj sincronizado, MySQL, cron y backups en el alojamiento. Conservar `APP_KEY`, pues cifra datos persistidos. `APP_DEBUG=false`.
+
+### Contrato móvil
+
+Prefijo `/api/v1`. `POST /auth/google` recibe `id_token` e `installation_id` UUID y devuelve `access_token`, `user_id`, `device_id`. Las demás rutas requieren bearer token. Duración configurable con `SESSION_TOKEN_DAYS` (30 por defecto); un nuevo login revoca el token previo de esa instalación. El cambio de dueño de una instalación queda bloqueado hasta definir un flujo explícito.
+
+| Operación | Ruta relativa |
+|---|---|
+| Identidad y salida | `GET /me`, `POST /auth/logout` |
+| Destino FCM | `PUT/DELETE /devices/current/push-token` |
+| Cuenta bancaria | `GET/POST /bank-account`, `POST /bank-account/refresh` |
+| Crear o abandonar cobro | `POST /payment-attempts`, `POST /payment-attempts/{id}/abandon` |
+| Acuse y reproducción | `POST /events/ack`, `POST /events/resume` |
+
+Alta bancaria: `alias`, `name`, `clabe` con verificador válido y `entity` (`PERSON`/`BUSINESS`). Respuestas con últimos cuatro dígitos, sin CLABE completa. Consulta al proveedor solo antes de ACTIVE.
+
+Alta bancaria y cobros exigen `Idempotency-Key` de 8–128 caracteres alfanuméricos, guion o guion bajo. Misma clave/contenido recupera el recurso; contenido distinto devuelve 409. Una respuesta externa incierta se conserva sin repetir el POST. Abandonar no cancela el recurso Pey.
+
+Cobros: `local_sale_id` UUID, `origin` (`CATALOG`/`DIRECT`), `amount_minor` entero en centavos MXN, `concept` y `method` (`CODI_QR`/`CODI_PUSH`). QR exige `qr_mode=per_sale`; push exige `phone` de diez dígitos. Caducidad externa de 600 segundos. QR fijo pendiente de definición. No enviar artículos ni ventas completas. Crear un intento no confirma dinero recibido.
+
+El push lleva el evento completo como JWS RS256 en `message.data.event`. ACK: `event_id`, `delivery_id`, `result` (`APPLIED`/`STORED_FOR_REVIEW`), después de persistir en Android. Resume devuelve solo aceptación. FCM aceptado no equivale a ACK. Se conserva el evento y se reenvía hasta su acuse; eventos sin relación quedan pendientes para revisión.
+
+### Verificación
+
+```powershell
+composer test
+php vendor/bin/pint --test
+composer validate --strict
+```
+
+24 pruebas / 81 comprobaciones verificadas con SQLite efímero y MySQL local. Para probar MySQL, definir las variables `DB_*` del proceso sobre una base **exclusiva de pruebas**: `RefreshDatabase` ejecuta migraciones. Las respuestas externas son simuladas; no se realizan cobros reales.
+
+Pendientes: validación real Google/Pey/FCM, integración Android, alojamiento, operación/retención y concurrencia con múltiples procesos. Sin despliegue de producción.
