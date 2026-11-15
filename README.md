@@ -8,7 +8,7 @@
 
 </div>
 
-> 🚧 **En desarrollo — fase de diseño.** El repositorio público `tabaagos_api` está inicializado. Todavía no contiene una aplicación Laravel ejecutable, migraciones o endpoints disponibles.
+> 🚧 **En desarrollo — fase de diseño.** El repositorio público `tabapagos_api` está inicializado. Todavía no contiene una aplicación Laravel ejecutable, migraciones o endpoints disponibles.
 
 ## 🧭 Explorar
 
@@ -115,8 +115,8 @@ Las versiones, dependencias y configuración de colas se fijarán al inicializar
 ## 🛠️ Desarrollo
 
 ```bash
-git clone https://github.com/xalpati/tabaagos_api.git
-cd tabaagos_api
+git clone https://github.com/xalpati/tabapagos_api.git
+cd tabapagos_api
 ```
 
 El repositorio contiene README y exclusiones iniciales. La configuración del entorno, instalación, migraciones, workers y pruebas se documentará al incorporar el proyecto Laravel.
