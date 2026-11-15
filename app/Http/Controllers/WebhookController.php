@@ -29,6 +29,20 @@ class WebhookController
         $inbox = WebhookInbox::query()->firstOrCreate(['webhook_id' => $headers['webhook-id']], ['body_hash' => $hash, 'event_type' => $data['type'], 'payload' => $data, 'state' => 'PENDING']);
         abort_unless(hash_equals($inbox->body_hash, $hash), 409);
 
+        // Procesar el inbox y despachar el evento push de inmediato tras persistir
+        try {
+            app(\App\Services\InboxProcessor::class)->process($inbox->id);
+            \App\Models\EventDelivery::query()
+                ->whereNull('acknowledged_at')
+                ->where('next_attempt_at', '<=', now())
+                ->orderBy('next_attempt_at')
+                ->limit(10)
+                ->pluck('id')
+                ->each(fn ($id) => app(\App\Services\OutboxDispatcher::class)->dispatch($id));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Webhook immediate dispatch deferred: ' . $e->getMessage());
+        }
+
         // El ACK del proveedor solo depende de la persistencia, no de FCM.
         return response()->json(['accepted' => true], 202);
     }

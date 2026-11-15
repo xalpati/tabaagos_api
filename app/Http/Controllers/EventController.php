@@ -23,7 +23,32 @@ class EventController
 
     public function resume(Request $r)
     {
-        EventDelivery::query()->where('device_id', $r->attributes->get('device')->id)->whereNull('acknowledged_at')->update(['next_attempt_at' => now()]);
+        $deviceId = $r->attributes->get('device')->id;
+
+        try {
+            \App\Models\WebhookInbox::query()
+                ->whereIn('state', ['PENDING', 'WAITING'])
+                ->orderBy('updated_at')
+                ->limit(20)
+                ->pluck('id')
+                ->each(fn ($id) => app(\App\Services\InboxProcessor::class)->process($id));
+        } catch (\Throwable) {}
+
+        EventDelivery::query()
+            ->where('device_id', $deviceId)
+            ->whereNull('acknowledged_at')
+            ->update(['next_attempt_at' => now()]);
+
+        try {
+            EventDelivery::query()
+                ->where('device_id', $deviceId)
+                ->whereNull('acknowledged_at')
+                ->where('next_attempt_at', '<=', now())
+                ->orderBy('next_attempt_at')
+                ->limit(20)
+                ->pluck('id')
+                ->each(fn ($id) => app(\App\Services\OutboxDispatcher::class)->dispatch($id));
+        } catch (\Throwable) {}
 
         return response()->json(['accepted' => true], 202);
     }
