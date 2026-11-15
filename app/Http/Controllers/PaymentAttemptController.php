@@ -27,14 +27,17 @@ class PaymentAttemptController
 
                 return [$prior, false];
             }
-            $bank = BankAccount::query()->where('user_id', $r->user()->id)->where('status', 'ACTIVE')->whereNotNull('provider_id')->first();
-            abort_unless($bank, 409);
+            $bank = BankAccount::query()->where('user_id', $r->user()->id)->whereNotNull('provider_id')->first();
+            abort_unless($bank, 409, 'No tienes una cuenta bancaria vinculada.');
 
             return [PaymentAttempt::query()->create(['user_id' => $r->user()->id, 'device_id' => $device->id, 'bank_account_id' => $bank->id, 'local_sale_id' => $data['local_sale_id'], 'origin' => $data['origin'], 'amount_minor' => $data['amount_minor'], 'method' => $data['method'], 'state' => 'SUBMITTING', 'idempotency_key' => $key, 'request_hash' => $hash]), true];
         });
         if ($created) {
             $bank = BankAccount::query()->findOrFail($attempt->bank_account_id);
-            $body = ['amount' => $data['amount_minor'] / 100, 'concept' => $data['concept'], 'expiration' => 600, 'bankAccountId' => $bank->provider_id, 'metadata' => ['payment_attempt_id' => $attempt->id, 'device_id' => $device->id, 'local_sale_id' => $data['local_sale_id']]];
+            $body = ['amount' => $data['amount_minor'] / 100, 'concept' => $data['concept'], 'expiration' => 600, 'metadata' => ['payment_attempt_id' => $attempt->id, 'device_id' => $device->id, 'local_sale_id' => $data['local_sale_id']]];
+            if ($bank->status === 'ACTIVE' && $bank->provider_id) {
+                $body['bankAccountId'] = $bank->provider_id;
+            }
             if ($data['method'] === 'CODI_PUSH') {
                 $body['phoneNumber'] = $data['phone'];
             } else {
@@ -50,8 +53,13 @@ class PaymentAttemptController
                     $current = PaymentAttempt::query()->whereKey($attempt->id)->lockForUpdate()->firstOrFail();
                     $current->update(['provider_id' => $providerId, 'creation_result' => array_intersect_key($result, array_flip(['id', 'qrString', 'transactionId', 'codiId'])), 'state' => in_array($current->state, ['PAID', 'REVIEW_REQUIRED'], true) ? $current->state : 'AWAITING_PAYMENT']);
                 });
-            } catch (\Throwable) {
-                PaymentAttempt::query()->whereKey($attempt->id)->where('state', 'SUBMITTING')->update(['state' => 'UNKNOWN']);
+            } catch (\Throwable $e) {
+                PaymentAttempt::query()->whereKey($attempt->id)->where('state', 'SUBMITTING')->update(['state' => 'FAILED']);
+
+                return response()->json([
+                    'code' => 'PROVIDER_ERROR',
+                    'message' => $e->getMessage(),
+                ], 422);
             }
         }
         $attempt->refresh();

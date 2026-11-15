@@ -22,7 +22,7 @@ class InboxProcessor
             }
             $p = $inbox->payload;
             if ($inbox->event_type === 'bank.account.updated') {
-                if (($p['ownerType'] ?? null) !== 'API_KEY' || ($p['ownerId'] ?? null) !== config('tabapagos.pey_key_id') || ($p['codiStatus'] ?? null) !== 'ACTIVE' || ! is_string($p['bankAccountId'] ?? null)) {
+                if (($p['ownerType'] ?? null) !== 'API_KEY' || (config('tabapagos.pey_key_id') && ($p['ownerId'] ?? null) !== config('tabapagos.pey_key_id')) || ($p['codiStatus'] ?? null) !== 'ACTIVE' || ! is_string($p['bankAccountId'] ?? null)) {
                     $inbox->update(['state' => 'REVIEW']);
 
                     return;
@@ -51,7 +51,7 @@ class InboxProcessor
                     return;
                 }
             }
-            if (($p['apiKeyId'] ?? null) !== config('tabapagos.pey_key_id') || (isset($p['currency']) && $p['currency'] !== 'MXN') || ! is_string($p['transactionId']) || strlen($p['transactionId']) > 255 || ! is_int($p['datePaid']) || $p['datePaid'] < 0 || $p['datePaid'] > time() + 300 || ! is_string($p['bankAccountId']) || (! is_int($p['amount']) && ! is_float($p['amount']))) {
+            if ((config('tabapagos.pey_key_id') && ($p['apiKeyId'] ?? null) !== config('tabapagos.pey_key_id')) || (isset($p['currency']) && $p['currency'] !== 'MXN') || ! is_string($p['transactionId']) || strlen($p['transactionId']) > 255 || ! is_int($p['datePaid']) || $p['datePaid'] < 0 || $p['datePaid'] > time() + 300 || ! is_string($p['bankAccountId']) || (! is_int($p['amount']) && ! is_float($p['amount']))) {
                 $inbox->update(['state' => 'REVIEW']);
 
                 return;
