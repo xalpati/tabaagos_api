@@ -16,7 +16,7 @@
 
 ## 🎯 Propósito
 
-Este servicio proporcionará las funciones remotas necesarias para [Tabapagos Android](https://github.com/xalpati/tabapagos), el punto de venta para teléfonos y tabletas, y para su sitio de presentación y descarga.
+Este servicio proporcionará las funciones remotas necesarias para [Tabapagos Android](https://github.com/xalpati/tabapagos), el punto de venta para teléfonos y tabletas.
 
 Este repositorio se dedica al backend Laravel/PHP y a su base de datos MySQL.
 
@@ -30,7 +30,6 @@ Este repositorio se dedica al backend Laravel/PHP y a su base de datos MySQL.
 | 💳 Intentos de cobro | Crear solicitudes CoDi QR/push y relacionarlas con usuario, dispositivo y venta local |
 | 📩 Webhook Pey | Recibir, autenticar y persistir eventos del proveedor |
 | 🔔 Entrega de eventos | Enviar confirmaciones firmadas con acuse y reenvío durable |
-| 📥 Distribución Android | Guardar formularios previos a descarga y autorizar acceso a la APK publicada |
 | 🧾 Auditoría | Conservar trazabilidad mínima y diagnósticos protegidos |
 
 Los nombres de módulos describen el diseño previsto, no servicios implementados.
@@ -76,16 +75,9 @@ Esta consulta bancaria es independiente de la confirmación de pagos.
 | Identidad y dispositivos autorizados | Catálogo y precios |
 | Cuenta bancaria y estado | Existencias y movimientos de inventario |
 | Intentos, transacciones y referencias mínimas de cobro | Detalle completo de las ventas y ventas en efectivo |
-| Eventos, entregas y acuses | Perfil del negocio e impresoras |
-| Registros y permisos de descarga | Historial local de cobros originados en ese equipo |
+| Eventos, entregas y acuses | Perfil del negocio, impresoras e historial local de cobros |
 
 La API no sincronizará el catálogo ni las ventas completas entre dispositivos. Tampoco proporcionará restauración de la base comercial local.
-
-## 📦 Soporte para descargar la APK
-
-La landing solicitará al backend el guardado de información esencial antes de habilitar la descarga. El registro será independiente del usuario Google y de su cuenta bancaria.
-
-El diseño contempla validación del formulario, protección contra abuso, aviso de privacidad, autorización temporal de descarga y metadatos reales de una APK de release firmada. Los campos definitivos, retención y configuración de orígenes/sesiones para el sitio separado deben cerrarse antes de publicar.
 
 ## 🔒 Seguridad prevista
 
@@ -127,5 +119,4 @@ El repositorio contiene README y exclusiones iniciales. La configuración del en
 - [ ] Identidad Google, sesiones y dispositivos.
 - [ ] Cuentas bancarias e intentos de cobro.
 - [ ] Webhook, persistencia, firma y entrega durable.
-- [ ] Registro de descargas y acceso controlado a APK.
 - [ ] Pruebas de integración y preparación de despliegue.
