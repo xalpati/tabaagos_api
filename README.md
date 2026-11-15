@@ -18,7 +18,7 @@
 
 Este servicio proporcionará las funciones remotas necesarias para [Tabapagos Android](https://github.com/xalpati/tabapagos), el punto de venta para teléfonos y tabletas, y para su sitio de presentación y descarga.
 
-La API, la aplicación Android y la landing Vue tienen **repositorios independientes**. Este repositorio se dedica al backend Laravel/PHP y a su base de datos MySQL.
+Este repositorio se dedica al backend Laravel/PHP y a su base de datos MySQL.
 
 ## 🧩 Responsabilidades previstas
 
