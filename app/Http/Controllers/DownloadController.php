@@ -5,19 +5,41 @@ namespace App\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class DownloadController extends Controller
 {
+    /**
+     * Calcula las métricas reales de descarga registradas en MySQL.
+     */
+    private function getDownloadStats(): array
+    {
+        $totalRegistrations = (int) DB::table('download_registrations')->count();
+        $totalGrantDownloads = (int) DB::table('download_grants')->sum('download_count');
+
+        // Cada permiso otorgado o descarga iniciada cuenta en el total acumulado
+        $totalDownloads = max($totalRegistrations, $totalGrantDownloads);
+
+        return [
+            'total_downloads' => $totalDownloads,
+            'total_registrations' => $totalRegistrations,
+            'total_apk_serves' => $totalGrantDownloads,
+        ];
+    }
+
     public function meta(): JsonResponse
     {
         $release = DB::table('apk_releases')->where('is_active', true)->latest()->first();
+        $stats = $this->getDownloadStats();
 
         if (! $release) {
             return response()->json([
                 'available' => false,
                 'message' => 'No hay una versión de APK publicada actualmente.',
+                'stats' => $stats,
             ], 404);
         }
 
@@ -34,6 +56,7 @@ class DownloadController extends Controller
                 'file_size_human' => round($release->file_size_bytes / (1024 * 1024), 1) . ' MB',
                 'file_sha256' => $release->file_sha256,
             ],
+            'stats' => $stats,
             'guide_url' => '/#guide',
         ]);
     }
@@ -95,6 +118,7 @@ class DownloadController extends Controller
                         'file_size_human' => round($release->file_size_bytes / (1024 * 1024), 1) . ' MB',
                         'file_sha256' => $release->file_sha256,
                     ],
+                    'stats' => $this->getDownloadStats(),
                     'guide_url' => '/#guide',
                 ], 200);
             }
@@ -105,18 +129,24 @@ class DownloadController extends Controller
         $token = Str::random(48);
         $expiresAt = now()->addMinutes(60);
 
-        DB::transaction(function () use ($registrationId, $grantId, $release, $token, $expiresAt, $validated, $requestId, $payloadHash, $request) {
+        $cleanName = trim($validated['name']);
+        $cleanEmail = strtolower(trim($validated['email']));
+        $cleanBusiness = trim($validated['business_name'] ?? '') ?: null;
+        $cleanPhone = trim($validated['phone'] ?? '') ?: null;
+        $ipAddress = $request->ip();
+
+        DB::transaction(function () use ($registrationId, $grantId, $release, $token, $expiresAt, $cleanName, $cleanEmail, $cleanBusiness, $cleanPhone, $validated, $requestId, $payloadHash, $ipAddress) {
             DB::table('download_registrations')->insert([
                 'id' => $registrationId,
-                'name' => trim($validated['name']),
-                'email' => strtolower(trim($validated['email'])),
-                'business_name' => trim($validated['business_name'] ?? '') ?: null,
-                'phone' => trim($validated['phone'] ?? '') ?: null,
+                'name' => $cleanName,
+                'email' => $cleanEmail,
+                'business_name' => $cleanBusiness,
+                'phone' => $cleanPhone,
                 'privacy_acknowledged' => true,
                 'privacy_notice_version' => $validated['privacy_notice_version'] ?? '2026-11-15',
                 'request_id' => $requestId,
                 'payload_hash' => $payloadHash,
-                'ip_address' => $request->ip(),
+                'ip_address' => $ipAddress,
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -127,11 +157,27 @@ class DownloadController extends Controller
                 'apk_release_id' => $release->id,
                 'token' => $token,
                 'expires_at' => $expiresAt,
-                'download_count' => 0,
+                'download_count' => 1,
+                'downloaded_at' => now(),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
         });
+
+        $stats = $this->getDownloadStats();
+
+        // Notificar por correo electrónico al administrador sin bloquear la descarga en caso de error SMTP
+        $this->sendRegistrationNotification([
+            'registration_id' => $registrationId,
+            'name' => $cleanName,
+            'email' => $cleanEmail,
+            'business_name' => $cleanBusiness ?? 'No especificado',
+            'phone' => $cleanPhone ?? 'No especificado',
+            'ip_address' => $ipAddress,
+            'version_name' => $release->version_name,
+            'registered_at' => now()->timezone('America/Mexico_City')->format('d/m/Y H:i:s'),
+            'total_downloads' => $stats['total_downloads'],
+        ]);
 
         return response()->json([
             'registration_id' => $registrationId,
@@ -144,8 +190,76 @@ class DownloadController extends Controller
                 'file_size_human' => round($release->file_size_bytes / (1024 * 1024), 1) . ' MB',
                 'file_sha256' => $release->file_sha256,
             ],
+            'stats' => $stats,
             'guide_url' => '/#guide',
         ], 201);
+    }
+
+    /**
+     * Envía los datos capturados en el formulario de descarga al correo del administrador.
+     */
+    private function sendRegistrationNotification(array $data): void
+    {
+        $recipient = env('DOWNLOAD_NOTIFICATION_EMAIL');
+        if (! $recipient) {
+            return;
+        }
+
+        try {
+            $subject = "Nueva descarga de Tabapagos APK (#{$data['total_downloads']}) - {$data['name']}";
+
+            $html = "
+            <div style='font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;'>
+                <div style='background: linear-gradient(135deg, #059669, #0d9488); color: #ffffff; padding: 20px 24px;'>
+                    <h2 style='margin: 0; font-size: 20px;'>Nuevo Registro de Descarga — Tabapagos POS</h2>
+                    <p style='margin: 6px 0 0 0; font-size: 13px; opacity: 0.9;'>Descarga acumulada #{$data['total_downloads']} • Versión {$data['version_name']}</p>
+                </div>
+                <div style='padding: 24px; background-color: #ffffff; color: #1e293b;'>
+                    <p style='margin-top: 0; font-size: 14px;'>Se ha registrado una nueva solicitud para descargar el instalador APK de Android:</p>
+                    <table style='width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 14px;'>
+                        <tr>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #475569; width: 40%;'>Nombre de contacto:</td>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #0f172a;'>" . e($data['name']) . "</td>
+                        </tr>
+                        <tr>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #475569;'>Correo electrónico:</td>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #0f172a;'><a href='mailto:" . e($data['email']) . "' style='color: #059669;'>" . e($data['email']) . "</a></td>
+                        </tr>
+                        <tr>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #475569;'>Nombre del negocio:</td>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #0f172a;'>" . e($data['business_name']) . "</td>
+                        </tr>
+                        <tr>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #475569;'>Teléfono / WhatsApp:</td>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #0f172a;'>" . e($data['phone']) . "</td>
+                        </tr>
+                        <tr>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #475569;'>Fecha y hora (CDMX):</td>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #0f172a;'>" . e($data['registered_at']) . "</td>
+                        </tr>
+                        <tr>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #475569;'>Dirección IP:</td>
+                            <td style='padding: 10px 12px; border-bottom: 1px solid #f1f5f9; color: #64748b;'>" . e($data['ip_address']) . "</td>
+                        </tr>
+                        <tr>
+                            <td style='padding: 10px 12px; font-weight: bold; color: #475569;'>Folio de registro:</td>
+                            <td style='padding: 10px 12px; color: #64748b; font-family: monospace; font-size: 12px;'>" . e($data['registration_id']) . "</td>
+                        </tr>
+                    </table>
+                </div>
+                <div style='background-color: #f8fafc; padding: 14px 24px; font-size: 12px; color: #64748b; text-align: center; border-top: 1px solid #e2e8f0;'>
+                    Notificación automática del servicio de distribución de Tabapagos API.
+                </div>
+            </div>";
+
+            Mail::html($html, function ($message) use ($recipient, $subject, $data) {
+                $message->to($recipient)
+                    ->replyTo($data['email'], $data['name'])
+                    ->subject($subject);
+            });
+        } catch (\Throwable $e) {
+            Log::warning('No se pudo enviar el correo de notificación de descarga: ' . $e->getMessage());
+        }
     }
 
     public function download(string $token): BinaryFileResponse|JsonResponse
